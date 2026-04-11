@@ -1,0 +1,19 @@
+{
+  "name": "better-watchlist-stremio-addon",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "bun --watch src/index.ts",
+    "start": "bun src/index.ts",
+    "check": "bunx tsc --noEmit"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.5",
+    "stremio-addon-sdk": "^1.6.10"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.2.11",
+    "typescript": "^5.8.3"
+  }
+}

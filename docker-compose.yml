@@ -1,0 +1,14 @@
+services:
+  better-watchlist:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: better-watchlist
+    restart: unless-stopped
+    init: true
+    env_file:
+      - .env
+    ports:
+      - "${PORT:-7311}:${PORT:-7311}"
+    volumes:
+      - ./data:/app/data
