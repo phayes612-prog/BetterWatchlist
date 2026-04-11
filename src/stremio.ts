@@ -1,10 +1,30 @@
 import { createRequire } from "node:module";
 
 import { buildNewEpisodesCatalog, watchlistEpisodesCatalog } from "./catalogs/new-episodes";
-import { TraktClient } from "./trakt/client";
+import { TraktClient, TraktRequestError } from "./trakt/client";
 
 const require = createRequire(import.meta.url);
 const { addonBuilder } = require("stremio-addon-sdk") as typeof import("stremio-addon-sdk");
+const LOG_THROTTLE_MS = 60 * 1000;
+const recentErrors = new Map<string, number>();
+
+const logCatalogError = (key: string, message: string, error?: unknown): void => {
+  const now = Date.now();
+  const lastLoggedAt = recentErrors.get(key) ?? 0;
+
+  if (now - lastLoggedAt < LOG_THROTTLE_MS) {
+    return;
+  }
+
+  recentErrors.set(key, now);
+
+  if (error) {
+    console.error(message, error);
+    return;
+  }
+
+  console.error(message);
+};
 
 export const buildAddonInterface = (traktClient: TraktClient) => {
   const builder = new addonBuilder({
@@ -67,7 +87,16 @@ export const buildAddonInterface = (traktClient: TraktClient) => {
         Number.isNaN(skip) ? 0 : skip,
       );
     } catch (error) {
-      console.error("Catalog handler failed:", error);
+      if (error instanceof TraktRequestError) {
+        logCatalogError(
+          `catalog:${error.path}:${error.status}`,
+          `Catalog handler hit a temporary Trakt error (${error.status}) on ${error.path}.`,
+          error,
+        );
+      } else {
+        logCatalogError("catalog:unknown", "Catalog handler failed:", error);
+      }
+
       return {
         metas: [],
         cacheMaxAge: 30,

@@ -27,6 +27,11 @@ export class TTLCache {
     return value;
   }
 
+  peek<T>(key: string): Promise<T> | undefined {
+    const entry = this.store.get(key) as CacheEntry<T> | undefined;
+    return entry?.value;
+  }
+
   clear(key: string): void {
     this.store.delete(key);
   }

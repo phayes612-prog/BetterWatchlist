@@ -9,12 +9,32 @@ import type {
 import { TraktAuthService } from "./auth";
 
 const TRAKT_API_URL = "https://api.trakt.tv";
+const RETRYABLE_STATUS_CODES = new Set([429, 500, 502, 503, 504]);
+const RETRY_DELAYS_MS = [350, 900];
 
 type RequestOptions = {
   auth?: boolean;
   cacheKey?: string;
   ttlMs?: number;
 };
+
+export class TraktRequestError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+    readonly path: string,
+    readonly payload: string,
+  ) {
+    super(message);
+    this.name = "TraktRequestError";
+  }
+
+  get isRetryable(): boolean {
+    return RETRYABLE_STATUS_CODES.has(this.status);
+  }
+}
+
+const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
 export class TraktClient {
   constructor(
@@ -97,16 +117,56 @@ export class TraktClient {
 
       if (!response.ok) {
         const payload = await response.text();
-        throw new Error(`Trakt request failed (${response.status}): ${payload}`);
+        throw new TraktRequestError(
+          `Trakt request failed (${response.status}): ${payload}`,
+          response.status,
+          path,
+          payload,
+        );
       }
 
       return (await response.json()) as T;
     };
 
+    const executeWithRetry = async (): Promise<T> => {
+      for (let attempt = 0; attempt <= RETRY_DELAYS_MS.length; attempt += 1) {
+        try {
+          return await execute();
+        } catch (error) {
+          const isLastAttempt = attempt === RETRY_DELAYS_MS.length;
+          const isRetryable =
+            error instanceof TraktRequestError
+              ? error.isRetryable
+              : error instanceof Error;
+
+          if (isLastAttempt || !isRetryable) {
+            throw error;
+          }
+
+          await sleep(RETRY_DELAYS_MS[attempt]);
+        }
+      }
+
+      throw new Error("Unreachable retry state");
+    };
+
     if (!options.cacheKey || !options.ttlMs) {
-      return execute();
+      return executeWithRetry();
     }
 
-    return this.cache.remember(options.cacheKey, options.ttlMs, execute);
+    const staleValue = this.cache.peek<T>(options.cacheKey);
+
+    try {
+      return await this.cache.remember(options.cacheKey, options.ttlMs, executeWithRetry);
+    } catch (error) {
+      const isRecoverableFailure =
+        error instanceof TraktRequestError ? error.isRetryable : error instanceof Error;
+
+      if (staleValue && isRecoverableFailure) {
+        return staleValue;
+      }
+
+      throw error;
+    }
   }
 }

@@ -8,11 +8,13 @@ import type {
   TraktWatchedProgress,
   WatchlistShowActivity,
 } from "../types";
-import { TraktClient } from "../trakt/client";
+import { TraktClient, TraktRequestError } from "../trakt/client";
 
 const CATALOG_ID = "trakt-watchlist-new-episodes";
 const CATALOG_NAME = "BetterWatchlist";
 const PAGE_SIZE = 100;
+const LOG_THROTTLE_MS = 60 * 1000;
+const recentWarnings = new Map<string, number>();
 
 const toTimestamp = (value?: string | null): number => {
   if (!value) {
@@ -150,6 +152,24 @@ const computeActivity = (
   };
 };
 
+const logCatalogWarning = (key: string, message: string, error?: unknown): void => {
+  const now = Date.now();
+  const lastLoggedAt = recentWarnings.get(key) ?? 0;
+
+  if (now - lastLoggedAt < LOG_THROTTLE_MS) {
+    return;
+  }
+
+  recentWarnings.set(key, now);
+
+  if (error) {
+    console.warn(message, error);
+    return;
+  }
+
+  console.warn(message);
+};
+
 const buildShowActivity = async (
   watchlistItem: TraktWatchlistItem,
   traktClient: TraktClient,
@@ -163,10 +183,23 @@ const buildShowActivity = async (
     return null;
   }
 
-  const [progress, seasons] = await Promise.all([
-    traktClient.getWatchedProgress(userId, show.ids.trakt),
-    traktClient.getShowSeasons(userId, show.ids.trakt),
-  ]);
+  let progress: TraktWatchedProgress;
+  let seasons: TraktSeason[];
+
+  try {
+    [progress, seasons] = await Promise.all([
+      traktClient.getWatchedProgress(userId, show.ids.trakt),
+      traktClient.getShowSeasons(userId, show.ids.trakt),
+    ]);
+  } catch (error) {
+    const key = error instanceof TraktRequestError ? `${error.path}:${error.status}` : `show:${show.ids.trakt}`;
+    logCatalogWarning(
+      key,
+      `Skipping "${show.title}" because Trakt returned a temporary error while building the catalog.`,
+      error,
+    );
+    return null;
+  }
 
   const completedEpisodes = buildCompletedEpisodeSet(progress);
   const { count: unwatchedAiredCount, latestAirDate } = getLatestUnwatchedAiredDate(
@@ -241,7 +274,26 @@ export const buildNewEpisodesCatalog = async (
   search?: string,
   skip = 0,
 ): Promise<{ metas: Array<Record<string, unknown>>; cacheMaxAge: number }> => {
-  const watchlistItems = await traktClient.getWatchlistShows(userId);
+  let watchlistItems: TraktWatchlistItem[];
+
+  try {
+    watchlistItems = await traktClient.getWatchlistShows(userId);
+  } catch (error) {
+    if (error instanceof TraktRequestError) {
+      logCatalogWarning(
+        `watchlist:${error.status}`,
+        "Trakt watchlist endpoint is temporarily failing. Returning an empty catalog for now.",
+        error,
+      );
+      return {
+        metas: [],
+        cacheMaxAge: 30,
+      };
+    }
+
+    throw error;
+  }
+
   const now = Date.now();
 
   const activities = await mapWithConcurrency(watchlistItems, 4, async (watchlistItem) =>
