@@ -386,6 +386,19 @@ export const renderAuthPage = ({ baseUrl }: AuthPageOptions): string => `<!docty
 
       const getSessionId = () => new URL(window.location.href).searchParams.get("sessionId") || "";
 
+      const normalizeManifestUrl = (url) => {
+        try {
+          const parsed = new URL(url, window.location.origin);
+          if (parsed.host === window.location.host) {
+            parsed.protocol = window.location.protocol;
+            parsed.host = window.location.host;
+          }
+          return parsed.toString();
+        } catch {
+          return url;
+        }
+      };
+
       const setSessionId = (sessionId) => {
         const url = new URL(window.location.href);
         if (sessionId) {
@@ -405,7 +418,8 @@ export const renderAuthPage = ({ baseUrl }: AuthPageOptions): string => `<!docty
       };
 
       const showAuthorized = (url, username) => {
-        manifestUrl.textContent = url;
+        const normalizedUrl = normalizeManifestUrl(url);
+        manifestUrl.textContent = normalizedUrl;
         manifestPanel.classList.remove("hidden");
         devicePanel.classList.add("hidden");
         pollButton.disabled = true;
