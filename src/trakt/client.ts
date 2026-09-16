@@ -46,7 +46,7 @@ export class TraktClient {
 
   getWatchlistShows(userId: string): Promise<TraktWatchlistItem[]> {
     return this.request<TraktWatchlistItem[]>(
-      "/users/me/lists/00%20-%20TV%20Shows/items/shows?extended=full",
+      "/users/me/lists/00-tv-shows/items/shows?extended=full",
       userId,
       {
         auth: true,
