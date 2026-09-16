@@ -34,7 +34,8 @@ export class TraktRequestError extends Error {
   }
 }
 
-const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
+const sleep = (ms: number): Promise<void> =>
+  new Promise((resolve) => setTimeout(resolve, ms));
 
 export class TraktClient {
   constructor(
@@ -45,17 +46,20 @@ export class TraktClient {
 
   getWatchlistShows(userId: string): Promise<TraktWatchlistItem[]> {
     return this.request<TraktWatchlistItem[]>(
-      "/users/me/watchlist/shows?extended=full",
+      "/users/me/lists/00%20-%20TV%20Shows/items/shows?extended=full",
       userId,
       {
         auth: true,
-        cacheKey: `trakt:${userId}:watchlist:shows`,
+        cacheKey: `trakt:${userId}:list:00-tv-shows`,
         ttlMs: config.watchlistCacheTtlMs,
       },
     );
   }
 
-  getWatchedProgress(userId: string, showId: number): Promise<TraktWatchedProgress> {
+  getWatchedProgress(
+    userId: string,
+    showId: number,
+  ): Promise<TraktWatchedProgress> {
     return this.request<TraktWatchedProgress>(
       `/shows/${showId}/progress/watched?hidden=false&specials=false&count_specials=false`,
       userId,
@@ -84,12 +88,18 @@ export class TraktClient {
     this.cache.clear(`trakt:${userId}:seasons:${showId}`);
   }
 
-  private async request<T>(path: string, userId: string, options: RequestOptions = {}): Promise<T> {
+  private async request<T>(
+    path: string,
+    userId: string,
+    options: RequestOptions = {},
+  ): Promise<T> {
     const execute = async (): Promise<T> => {
       const credentials = this.store.getTraktAppCredentials();
 
       if (!credentials) {
-        throw new Error("Trakt app is not configured yet. Open /auth/start and add client_id/client_secret.");
+        throw new Error(
+          "Trakt app is not configured yet. Open /auth/start and add client_id/client_secret.",
+        );
       }
 
       const headers = new Headers({
@@ -99,7 +109,10 @@ export class TraktClient {
       });
 
       if (options.auth) {
-        headers.set("Authorization", `Bearer ${await this.authService.getValidAccessToken(userId)}`);
+        headers.set(
+          "Authorization",
+          `Bearer ${await this.authService.getValidAccessToken(userId)}`,
+        );
       }
 
       let response = await fetch(`${TRAKT_API_URL}${path}`, {
@@ -108,7 +121,11 @@ export class TraktClient {
       });
 
       if (response.status === 401 && options.auth) {
-        headers.set("Authorization", `Bearer ${await this.authService.forceRefreshAccessToken(userId)}`);
+        headers.set(
+          "Authorization",
+          `Bearer ${await this.authService.forceRefreshAccessToken(userId)}`,
+        );
+
         response = await fetch(`${TRAKT_API_URL}${path}`, {
           method: "GET",
           headers,
@@ -117,6 +134,7 @@ export class TraktClient {
 
       if (!response.ok) {
         const payload = await response.text();
+
         throw new TraktRequestError(
           `Trakt request failed (${response.status}): ${payload}`,
           response.status,
@@ -129,7 +147,11 @@ export class TraktClient {
     };
 
     const executeWithRetry = async (): Promise<T> => {
-      for (let attempt = 0; attempt <= RETRY_DELAYS_MS.length; attempt += 1) {
+      for (
+        let attempt = 0;
+        attempt <= RETRY_DELAYS_MS.length;
+        attempt += 1
+      ) {
         try {
           return await execute();
         } catch (error) {
@@ -157,10 +179,16 @@ export class TraktClient {
     const staleValue = this.cache.peek<T>(options.cacheKey);
 
     try {
-      return await this.cache.remember(options.cacheKey, options.ttlMs, executeWithRetry);
+      return await this.cache.remember(
+        options.cacheKey,
+        options.ttlMs,
+        executeWithRetry,
+      );
     } catch (error) {
       const isRecoverableFailure =
-        error instanceof TraktRequestError ? error.isRetryable : error instanceof Error;
+        error instanceof TraktRequestError
+          ? error.isRetryable
+          : error instanceof Error;
 
       if (staleValue && isRecoverableFailure) {
         return staleValue;
